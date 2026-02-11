@@ -1,26 +1,31 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/constants/route_constants.dart';
 import '../../../providers/auth_provider.dart';
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final authProvider = context.watch<AuthProvider>();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final currentUser = ref.watch(currentUserProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          authProvider.user?.email ?? '프로필',
+          currentUser.when(
+            data: (user) => user?.username ?? '프로필',
+            loading: () => '로딩...',
+            error: (_, __) => '프로필',
+          ),
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.menu),
             onPressed: () {
-              // TODO: 설정 메뉴
-              _showSettingsBottomSheet(context);
+              _showSettingsBottomSheet(context, ref);
             },
           ),
         ],
@@ -34,34 +39,35 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  void _showSettingsBottomSheet(BuildContext context) {
+  void _showSettingsBottomSheet(BuildContext context, WidgetRef ref) {
     showModalBottomSheet(
       context: context,
-      builder: (context) => SafeArea(
+      builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
               leading: const Icon(Icons.settings),
               title: const Text('설정'),
-              onTap: () => Navigator.pop(context),
+              onTap: () => Navigator.pop(ctx),
             ),
             ListTile(
               leading: const Icon(Icons.bookmark_border),
               title: const Text('저장됨'),
-              onTap: () => Navigator.pop(context),
+              onTap: () => Navigator.pop(ctx),
             ),
             ListTile(
               leading: const Icon(Icons.dark_mode),
               title: const Text('다크 모드'),
-              onTap: () => Navigator.pop(context),
+              onTap: () => Navigator.pop(ctx),
             ),
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.red),
               title: const Text('로그아웃', style: TextStyle(color: Colors.red)),
               onTap: () {
-                Navigator.pop(context);
-                context.read<AuthProvider>().signOut();
+                Navigator.pop(ctx);
+                ref.read(authNotifierProvider.notifier).signOut();
+                context.go(RouteConstants.loginPath);
               },
             ),
           ],

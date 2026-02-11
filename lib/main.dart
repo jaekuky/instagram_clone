@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_provider.dart';
-import 'providers/auth_provider.dart';
 import 'router/app_router.dart';
 
 Future<void> main() async {
@@ -23,37 +22,51 @@ Future<void> main() async {
     ),
   );
 
-  runApp(const InstaCloneApp());
+  // 3. Riverpod ProviderScope로 앱 실행
+  runApp(
+    const ProviderScope(
+      child: InstaCloneApp(),
+    ),
+  );
 }
 
-class InstaCloneApp extends StatelessWidget {
+class InstaCloneApp extends ConsumerStatefulWidget {
   const InstaCloneApp({super.key});
 
   @override
+  ConsumerState<InstaCloneApp> createState() => _InstaCloneAppState();
+}
+
+class _InstaCloneAppState extends ConsumerState<InstaCloneApp> {
+  // ThemeProvider는 간단한 로컬 상태이므로 그대로 유지
+  final _themeProvider = ThemeProvider();
+
+  @override
+  void dispose() {
+    _themeProvider.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MultiProvider(
-      providers: [
-        // 테마 관리
-        ChangeNotifierProvider(create: (_) => ThemeProvider()),
-        // 인증 관리
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
-      ],
-      child: Consumer<ThemeProvider>(
-        builder: (context, themeProvider, child) {
-          return MaterialApp.router(
-            title: 'Instagram Clone',
-            debugShowCheckedModeBanner: false,
+    final router = ref.watch(routerProvider);
 
-            // 테마 설정
-            theme: AppTheme.lightTheme,
-            darkTheme: AppTheme.darkTheme,
-            themeMode: themeProvider.themeMode,
+    return AnimatedBuilder(
+      animation: _themeProvider,
+      builder: (context, child) {
+        return MaterialApp.router(
+          title: 'Instagram Clone',
+          debugShowCheckedModeBanner: false,
 
-            // GoRouter 라우팅
-            routerConfig: AppRouter.router,
-          );
-        },
-      ),
+          // 테마 설정
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: _themeProvider.themeMode,
+
+          // GoRouter 라우팅 (Riverpod 연동)
+          routerConfig: router,
+        );
+      },
     );
   }
 }

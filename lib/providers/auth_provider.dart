@@ -1,91 +1,144 @@
-import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
+import '../models/user_model.dart';
 import '../services/auth_service.dart';
 
-enum AuthStatus {
+// ──────────────────────────────────────────
+// AuthService 인스턴스 프로바이더
+// ──────────────────────────────────────────
+final authServiceProvider = Provider<AuthService>((ref) {
+  return AuthService();
+});
+
+// ──────────────────────────────────────────
+// 인증 상태 스트림 프로바이더
+// (Supabase auth state change를 실시간 감지)
+// ──────────────────────────────────────────
+final authStateProvider = StreamProvider<supabase.AuthState>((ref) {
+  final authService = ref.watch(authServiceProvider);
+  return authService.onAuthStateChange;
+});
+
+// ──────────────────────────────────────────
+// 현재 유저 프로필 프로바이더
+// (인증 상태가 변할 때마다 자동으로 프로필을 가져옴)
+// ──────────────────────────────────────────
+final currentUserProvider = FutureProvider<UserModel?>((ref) async {
+  final authState = ref.watch(authStateProvider);
+
+  return authState.when(
+    data: (state) async {
+      if (state.session?.user != null) {
+        final authService = ref.read(authServiceProvider);
+        return await authService.getCurrentUserProfile();
+      }
+      return null;
+    },
+    loading: () => null,
+    error: (_, __) => null,
+  );
+});
+
+// ──────────────────────────────────────────
+// 인증 여부 간편 프로바이더
+// ──────────────────────────────────────────
+final isAuthenticatedProvider = Provider<bool>((ref) {
+  final authState = ref.watch(authStateProvider);
+  return authState.when(
+    data: (state) => state.session != null,
+    loading: () {
+      // 스트림 로딩 중에도 현재 세션 확인
+      final authService = ref.read(authServiceProvider);
+      return authService.currentUser != null;
+    },
+    error: (_, __) => false,
+  );
+});
+
+// ──────────────────────────────────────────
+// 인증 액션 상태
+// ──────────────────────────────────────────
+
+enum AuthActionStatus {
   initial,
-  authenticated,
-  unauthenticated,
   loading,
+  success,
   error,
 }
 
-class AuthProvider extends ChangeNotifier {
-  final AuthService _authService = AuthService();
+class AuthActionState {
+  final AuthActionStatus status;
+  final String? errorMessage;
 
-  AuthStatus _status = AuthStatus.initial;
-  User? _user;
-  String? _errorMessage;
+  const AuthActionState({
+    this.status = AuthActionStatus.initial,
+    this.errorMessage,
+  });
 
-  AuthStatus get status => _status;
-  User? get user => _user;
-  String? get errorMessage => _errorMessage;
-  bool get isAuthenticated => _status == AuthStatus.authenticated;
-
-  AuthProvider() {
-    _init();
+  AuthActionState copyWith({
+    AuthActionStatus? status,
+    String? errorMessage,
+  }) {
+    return AuthActionState(
+      status: status ?? this.status,
+      errorMessage: errorMessage,
+    );
   }
+}
 
-  void _init() {
-    _user = _authService.currentUser;
-    _status =
-        _user != null ? AuthStatus.authenticated : AuthStatus.unauthenticated;
+// ──────────────────────────────────────────
+// AuthNotifier: 로그인/회원가입/로그아웃 액션
+// ──────────────────────────────────────────
 
-    // 인증 상태 변경 리스너
-    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      final event = data.event;
-      final session = data.session;
+class AuthNotifier extends StateNotifier<AuthActionState> {
+  final AuthService _authService;
+  final Ref _ref;
 
-      if (event == AuthChangeEvent.signedIn && session != null) {
-        _user = session.user;
-        _status = AuthStatus.authenticated;
-      } else if (event == AuthChangeEvent.signedOut) {
-        _user = null;
-        _status = AuthStatus.unauthenticated;
-      }
-      notifyListeners();
-    });
-  }
+  AuthNotifier(this._authService, this._ref)
+      : super(const AuthActionState());
 
   /// 회원가입
   Future<bool> signUp({
     required String email,
     required String password,
     required String username,
-    required String displayName,
+    required String fullName,
   }) async {
     try {
-      _status = AuthStatus.loading;
-      _errorMessage = null;
-      notifyListeners();
+      state = state.copyWith(
+        status: AuthActionStatus.loading,
+        errorMessage: null,
+      );
 
       final response = await _authService.signUp(
         email: email,
         password: password,
         username: username,
-        displayName: displayName,
+        fullName: fullName,
       );
 
       if (response.user != null) {
-        _user = response.user;
-        _status = AuthStatus.authenticated;
-        notifyListeners();
+        state = state.copyWith(status: AuthActionStatus.success);
+        _ref.invalidate(currentUserProvider);
         return true;
       } else {
-        _status = AuthStatus.unauthenticated;
-        _errorMessage = '회원가입에 실패했습니다.';
-        notifyListeners();
+        state = state.copyWith(
+          status: AuthActionStatus.error,
+          errorMessage: '회원가입에 실패했습니다.',
+        );
         return false;
       }
-    } on AuthException catch (e) {
-      _status = AuthStatus.error;
-      _errorMessage = e.message;
-      notifyListeners();
+    } on supabase.AuthException catch (e) {
+      state = state.copyWith(
+        status: AuthActionStatus.error,
+        errorMessage: _translateAuthError(e.message),
+      );
       return false;
     } catch (e) {
-      _status = AuthStatus.error;
-      _errorMessage = '알 수 없는 오류가 발생했습니다.';
-      notifyListeners();
+      state = state.copyWith(
+        status: AuthActionStatus.error,
+        errorMessage: '알 수 없는 오류가 발생했습니다.',
+      );
       return false;
     }
   }
@@ -96,9 +149,10 @@ class AuthProvider extends ChangeNotifier {
     required String password,
   }) async {
     try {
-      _status = AuthStatus.loading;
-      _errorMessage = null;
-      notifyListeners();
+      state = state.copyWith(
+        status: AuthActionStatus.loading,
+        errorMessage: null,
+      );
 
       final response = await _authService.signIn(
         email: email,
@@ -106,25 +160,27 @@ class AuthProvider extends ChangeNotifier {
       );
 
       if (response.user != null) {
-        _user = response.user;
-        _status = AuthStatus.authenticated;
-        notifyListeners();
+        state = state.copyWith(status: AuthActionStatus.success);
+        _ref.invalidate(currentUserProvider);
         return true;
       } else {
-        _status = AuthStatus.unauthenticated;
-        _errorMessage = '로그인에 실패했습니다.';
-        notifyListeners();
+        state = state.copyWith(
+          status: AuthActionStatus.error,
+          errorMessage: '로그인에 실패했습니다.',
+        );
         return false;
       }
-    } on AuthException catch (e) {
-      _status = AuthStatus.error;
-      _errorMessage = e.message;
-      notifyListeners();
+    } on supabase.AuthException catch (e) {
+      state = state.copyWith(
+        status: AuthActionStatus.error,
+        errorMessage: _translateAuthError(e.message),
+      );
       return false;
     } catch (e) {
-      _status = AuthStatus.error;
-      _errorMessage = '알 수 없는 오류가 발생했습니다.';
-      notifyListeners();
+      state = state.copyWith(
+        status: AuthActionStatus.error,
+        errorMessage: '알 수 없는 오류가 발생했습니다.',
+      );
       return false;
     }
   }
@@ -132,14 +188,45 @@ class AuthProvider extends ChangeNotifier {
   /// 로그아웃
   Future<void> signOut() async {
     await _authService.signOut();
-    _user = null;
-    _status = AuthStatus.unauthenticated;
-    notifyListeners();
+    state = state.copyWith(
+      status: AuthActionStatus.initial,
+      errorMessage: null,
+    );
+    _ref.invalidate(currentUserProvider);
   }
 
   /// 에러 메시지 초기화
   void clearError() {
-    _errorMessage = null;
-    notifyListeners();
+    state = state.copyWith(
+      status: AuthActionStatus.initial,
+      errorMessage: null,
+    );
+  }
+
+  /// Supabase 에러 메시지를 한국어로 변환
+  String _translateAuthError(String message) {
+    if (message.contains('Invalid login credentials')) {
+      return '이메일 또는 비밀번호가 올바르지 않습니다.';
+    }
+    if (message.contains('Email not confirmed')) {
+      return '이메일 인증이 완료되지 않았습니다. 이메일을 확인해주세요.';
+    }
+    if (message.contains('User already registered')) {
+      return '이미 등록된 이메일입니다.';
+    }
+    if (message.contains('Password should be at least')) {
+      return '비밀번호는 최소 6자 이상이어야 합니다.';
+    }
+    if (message.contains('rate limit')) {
+      return '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.';
+    }
+    return message;
   }
 }
+
+// AuthNotifier 프로바이더
+final authNotifierProvider =
+    StateNotifierProvider<AuthNotifier, AuthActionState>((ref) {
+  final authService = ref.watch(authServiceProvider);
+  return AuthNotifier(authService, ref);
+});

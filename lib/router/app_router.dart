@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/constants/route_constants.dart';
 import '../core/widgets/main_shell.dart';
 import '../features/auth/screens/login_screen.dart';
@@ -12,32 +16,26 @@ import '../features/search/screens/search_screen.dart';
 import '../features/upload/screens/upload_screen.dart';
 import '../services/supabase_service.dart';
 
-class AppRouter {
-  AppRouter._();
+// ──────────────────────────────────────────
+// GoRouter 프로바이더 (Riverpod 연동)
+// ──────────────────────────────────────────
+final routerProvider = Provider<GoRouter>((ref) {
+  final authNotifier = AuthRouterNotifier();
 
-  // Navigator Keys
-  static final _rootNavigatorKey = GlobalKey<NavigatorState>();
-  static final _shellNavigatorFeedKey =
-      GlobalKey<NavigatorState>(debugLabel: 'shellFeed');
-  static final _shellNavigatorSearchKey =
-      GlobalKey<NavigatorState>(debugLabel: 'shellSearch');
-  static final _shellNavigatorUploadKey =
-      GlobalKey<NavigatorState>(debugLabel: 'shellUpload');
-  static final _shellNavigatorNotificationsKey =
-      GlobalKey<NavigatorState>(debugLabel: 'shellNotifications');
-  static final _shellNavigatorProfileKey =
-      GlobalKey<NavigatorState>(debugLabel: 'shellProfile');
+  ref.onDispose(() => authNotifier.dispose());
 
-  static final GoRouter router = GoRouter(
+  return GoRouter(
     navigatorKey: _rootNavigatorKey,
     initialLocation: RouteConstants.feedPath,
     debugLogDiagnostics: true,
+    refreshListenable: authNotifier,
 
     // 인증 상태에 따라 리다이렉트
     redirect: (context, state) {
       final isLoggedIn = SupabaseService.isLoggedIn;
-      final isAuthRoute = state.matchedLocation == RouteConstants.loginPath ||
-          state.matchedLocation == RouteConstants.signUpPath;
+      final isAuthRoute =
+          state.matchedLocation == RouteConstants.loginPath ||
+              state.matchedLocation == RouteConstants.signUpPath;
 
       // 로그인하지 않은 상태에서 인증 화면이 아니면 로그인으로 리다이렉트
       if (!isLoggedIn && !isAuthRoute) {
@@ -175,4 +173,40 @@ class AppRouter {
       ),
     ),
   );
+});
+
+// ──────────────────────────────────────────
+// Navigator Keys
+// ──────────────────────────────────────────
+final _rootNavigatorKey = GlobalKey<NavigatorState>();
+final _shellNavigatorFeedKey =
+    GlobalKey<NavigatorState>(debugLabel: 'shellFeed');
+final _shellNavigatorSearchKey =
+    GlobalKey<NavigatorState>(debugLabel: 'shellSearch');
+final _shellNavigatorUploadKey =
+    GlobalKey<NavigatorState>(debugLabel: 'shellUpload');
+final _shellNavigatorNotificationsKey =
+    GlobalKey<NavigatorState>(debugLabel: 'shellNotifications');
+final _shellNavigatorProfileKey =
+    GlobalKey<NavigatorState>(debugLabel: 'shellProfile');
+
+// ──────────────────────────────────────────
+// Auth Router Notifier
+// Supabase 인증 상태 변경 시 GoRouter에게 리프레시 알림
+// ──────────────────────────────────────────
+class AuthRouterNotifier extends ChangeNotifier {
+  late final StreamSubscription<AuthState> _subscription;
+
+  AuthRouterNotifier() {
+    _subscription =
+        SupabaseService.authStateChanges.listen((_) {
+      notifyListeners();
+    });
+  }
+
+  @override
+  void dispose() {
+    _subscription.cancel();
+    super.dispose();
+  }
 }
