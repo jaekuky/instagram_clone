@@ -1,3 +1,5 @@
+import 'user_model.dart';
+
 class PostModel {
   final String id;
   final String userId;
@@ -9,6 +11,15 @@ class PostModel {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  /// JOIN으로 가져온 작성자 프로필 정보 (선택적)
+  final UserModel? user;
+
+  /// 현재 사용자가 좋아요를 눌렀는지 (클라이언트 측에서 설정)
+  final bool isLiked;
+
+  /// 현재 사용자가 저장했는지 (클라이언트 측에서 설정)
+  final bool isSaved;
+
   const PostModel({
     required this.id,
     required this.userId,
@@ -19,6 +30,9 @@ class PostModel {
     this.commentsCount = 0,
     required this.createdAt,
     required this.updatedAt,
+    this.user,
+    this.isLiked = false,
+    this.isSaved = false,
   });
 
   factory PostModel.fromJson(Map<String, dynamic> json) {
@@ -32,6 +46,9 @@ class PostModel {
       commentsCount: json['comments_count'] as int? ?? 0,
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
+      user: json['profiles'] != null
+          ? UserModel.fromJson(json['profiles'] as Map<String, dynamic>)
+          : null,
     );
   }
 
@@ -49,6 +66,16 @@ class PostModel {
     };
   }
 
+  /// INSERT용 (id, counts, timestamps 제외)
+  Map<String, dynamic> toInsertJson() {
+    return {
+      'user_id': userId,
+      'image_url': imageUrl,
+      'caption': caption,
+      'location': location,
+    };
+  }
+
   PostModel copyWith({
     String? id,
     String? userId,
@@ -59,6 +86,9 @@ class PostModel {
     int? commentsCount,
     DateTime? createdAt,
     DateTime? updatedAt,
+    UserModel? user,
+    bool? isLiked,
+    bool? isSaved,
   }) {
     return PostModel(
       id: id ?? this.id,
@@ -70,6 +100,9 @@ class PostModel {
       commentsCount: commentsCount ?? this.commentsCount,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      user: user ?? this.user,
+      isLiked: isLiked ?? this.isLiked,
+      isSaved: isSaved ?? this.isSaved,
     );
   }
 }
